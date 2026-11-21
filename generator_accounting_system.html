@@ -1,0 +1,1947 @@
+<!DOCTYPE html>
+<html lang="ckb" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>حیساباتی مۆلیدە</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'IBM Plex Sans Arabic', 'Inter', sans-serif;
+            background-color: #0b1120;
+            color: #f8fafc;
+            overflow-x: hidden;
+        }
+        /* Rectangular subscriber cards with status colors */
+        .sub-card-paid {
+            background: linear-gradient(135deg, #064e3b 0%, #065f46 100%);
+            border-color: #10b981;
+        }
+        .sub-card-unpaid {
+            background: linear-gradient(135deg, #450a0a 0%, #7f1d1d 100%);
+            border-color: #ef4444;
+        }
+        .sub-card-inactive {
+            background: linear-gradient(135deg, #090d16 0%, #1e293b 100%);
+            border-color: #475569;
+            opacity: 0.9;
+        }
+        .tabular-nums {
+            font-variant-numeric: tabular-nums;
+        }
+        @media print {
+            body * {
+                visibility: hidden;
+            }
+            #print-receipt-area, #print-receipt-area * {
+                visibility: visible;
+            }
+            #print-receipt-area {
+                position: fixed;
+                inset: 0;
+                background: #ffffff !important;
+                color: #0f172a !important;
+                padding: 24px;
+                display: block !important;
+            }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+    <!-- Top Header -->
+    <header class="sticky top-0 z-30 bg-slate-900/95 backdrop-blur border-b border-slate-800 px-3 sm:px-6 py-3">
+        <div class="max-w-7xl mx-auto flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+            <!-- Brand & Month Info -->
+            <div class="flex items-center justify-between gap-3">
+                <div>
+                    <h1 id="app-title" class="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
+                        <span>حیساباتی مۆلیدە</span>
+                        <span id="current-month-badge" class="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40"></span>
+                    </h1>
+                    <p id="app-subtitle" class="text-xs text-slate-400 mt-0.5"></p>
+                </div>
+            </div>
+
+            <!-- Role Switcher, Sync Status & Language Toggle -->
+            <div class="flex items-center gap-2 flex-wrap">
+                <span id="online-sync-badge" class="px-2.5 py-1.5 rounded-xl text-[11px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-700/70 flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span id="lbl-online-status">ئۆنلاین • هاوبەش</span>
+                </span>
+
+                <button type="button" id="btn-share-link" onclick="copyLiveSessionLink()" class="px-3 py-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-700 transition">
+                    لینکی هاوبەش
+                </button>
+
+                <!-- Role Buttons -->
+                <div class="inline-flex rounded-xl bg-slate-950 p-1 border border-slate-800">
+                    <button type="button" id="role-accountant-btn" onclick="switchRole('accountant')" class="px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition"></button>
+                    <button type="button" id="role-owner-btn" onclick="switchRole('owner')" class="px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition"></button>
+                </div>
+
+                <!-- Language Switcher -->
+                <button type="button" id="lang-toggle-btn" onclick="toggleLanguage()" class="px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition">
+                    عربي
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-5">
+        <!-- Owner Banner Only (Accountant explanatory banner intentionally omitted) -->
+        <div id="owner-status-banner" class="hidden rounded-2xl bg-amber-950/50 border border-amber-700/60 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div class="text-xs sm:text-sm text-amber-200 font-medium" id="owner-banner-text"></div>
+            <div class="flex items-center gap-2 flex-wrap">
+                <button type="button" id="btn-close-month" onclick="closeCurrentMonth()" class="px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-bold bg-rose-600 hover:bg-rose-500 text-white shadow transition"></button>
+            </div>
+        </div>
+
+        <!-- Navigation Tabs (Accountant only sees Subscribers, Expenses, Payments) -->
+        <nav class="flex items-center gap-2 overflow-x-auto pb-1">
+            <button type="button" id="tab-subscribers" onclick="switchTab('subscribers')" class="tab-btn px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition"></button>
+            <button type="button" id="tab-expenses" onclick="switchTab('expenses')" class="tab-btn px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition"></button>
+            <button type="button" id="tab-payments" onclick="switchTab('payments')" class="tab-btn px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition"></button>
+            <button type="button" id="tab-archive" onclick="switchTab('archive')" class="tab-btn hidden px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition"></button>
+            <button type="button" id="tab-settings" onclick="switchTab('settings')" class="tab-btn hidden px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition"></button>
+        </nav>
+
+        <!-- TAB 1: SUBSCRIBERS -->
+        <section id="section-subscribers" class="space-y-4">
+            <!-- Owner Add Subscriber Form -->
+            <div id="owner-add-subscriber-panel" class="hidden rounded-2xl bg-slate-900 border border-slate-800 p-4 sm:p-5 space-y-4">
+                <div class="flex items-center justify-between">
+                    <h2 id="lbl-add-subscriber" class="text-base sm:text-lg font-bold text-white"></h2>
+                    <span id="lbl-rate-info" class="text-xs text-amber-300 font-semibold"></span>
+                </div>
+                <form id="add-subscriber-form" onsubmit="handleAddSubscriber(event)" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+                    <div>
+                        <label id="lbl-sub-code" class="block text-xs text-slate-400 mb-1"></label>
+                        <input type="text" id="sub-code" required class="w-full rounded-xl bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500">
+                    </div>
+                    <div class="lg:col-span-2">
+                        <label id="lbl-sub-name" class="block text-xs text-slate-400 mb-1"></label>
+                        <input type="text" id="sub-name" required class="w-full rounded-xl bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500">
+                    </div>
+                    <div>
+                        <label id="lbl-sub-phone" class="block text-xs text-slate-400 mb-1"></label>
+                        <input type="text" id="sub-phone" placeholder="0770..." class="w-full rounded-xl bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500">
+                    </div>
+                    <div>
+                        <label id="lbl-sub-amps" class="block text-xs text-slate-400 mb-1"></label>
+                        <input type="number" id="sub-amps" min="0" step="0.5" value="5" required class="w-full rounded-xl bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500">
+                    </div>
+                    <div>
+                        <label id="lbl-sub-days" class="block text-xs text-slate-400 mb-1"></label>
+                        <input type="number" id="sub-days" min="1" max="31" value="30" required class="w-full rounded-xl bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500">
+                    </div>
+                    <div>
+                        <label id="lbl-sub-prev-debt" class="block text-xs text-slate-400 mb-1"></label>
+                        <input type="number" id="sub-prev-debt" min="0" step="250" value="0" class="w-full rounded-xl bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500">
+                    </div>
+                    <div class="sm:col-span-2 lg:col-span-5 flex items-end">
+                        <button type="submit" id="btn-add-subscriber" class="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold transition"></button>
+                    </div>
+                </form>
+
+                <!-- Import Subscribers via Excel / CSV File -->
+                <div class="pt-3 border-t border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div class="space-y-0.5">
+                        <p id="lbl-excel-import-title" class="text-xs sm:text-sm font-bold text-sky-300"></p>
+                        <p id="lbl-excel-import-desc" class="text-xs text-slate-400"></p>
+                    </div>
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <button type="button" id="btn-download-excel-template" onclick="downloadSubscriberExcelTemplate()" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 text-xs sm:text-sm font-semibold transition"></button>
+                        <label class="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs sm:text-sm font-bold cursor-pointer transition">
+                            <span id="btn-import-excel-label"></span>
+                            <input type="file" id="excel-subscriber-file" accept=".xlsx,.xls,.csv" onchange="handleImportSubscribersExcel(event)" class="hidden">
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Search, Filter & SORT Controls -->
+            <div class="rounded-2xl bg-slate-900 border border-slate-800 p-3.5 sm:p-4 flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
+                <div class="flex-1">
+                    <input type="text" id="search-input" oninput="renderSubscribers()" class="w-full rounded-xl bg-slate-950 border border-slate-700 px-3.5 py-2 text-sm text-white focus:outline-none focus:border-sky-500">
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <select id="status-filter" onchange="renderSubscribers()" class="rounded-xl bg-slate-950 border border-slate-700 px-3 py-2 text-xs sm:text-sm text-slate-200 focus:outline-none">
+                        <option value="all" id="opt-filter-all"></option>
+                        <option value="paid" id="opt-filter-paid"></option>
+                        <option value="unpaid" id="opt-filter-unpaid"></option>
+                        <option value="inactive" id="opt-filter-inactive"></option>
+                    </select>
+                    <div class="flex items-center gap-1.5 bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-1.5">
+                        <span class="text-xs font-extrabold text-amber-400">SORT</span>
+                        <select id="sort-select" onchange="renderSubscribers()" class="bg-transparent text-xs sm:text-sm text-slate-200 focus:outline-none">
+                            <option value="code" id="opt-sort-code"></option>
+                            <option value="name" id="opt-sort-name"></option>
+                            <option value="amps" id="opt-sort-amps"></option>
+                            <option value="remaining" id="opt-sort-remaining"></option>
+                            <option value="status" id="opt-sort-status"></option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Legend -->
+            <div class="flex flex-wrap items-center gap-4 text-xs text-slate-300 px-1">
+                <span class="flex items-center gap-1.5"><span class="w-3.5 h-3.5 rounded bg-emerald-600 inline-block"></span><span id="legend-paid"></span></span>
+                <span class="flex items-center gap-1.5"><span class="w-3.5 h-3.5 rounded bg-red-800 inline-block"></span><span id="legend-unpaid"></span></span>
+                <span class="flex items-center gap-1.5"><span class="w-3.5 h-3.5 rounded bg-slate-800 border border-slate-500 inline-block"></span><span id="legend-inactive"></span></span>
+            </div>
+
+            <!-- Single-Column Vertical List of Rectangular Subscriber Cards -->
+            <div id="subscribers-list" class="flex flex-col gap-3"></div>
+        </section>
+
+        <!-- TAB 2: EXPENSES -->
+        <section id="section-expenses" class="hidden space-y-4">
+            <div class="rounded-2xl bg-slate-900 border border-slate-800 p-4 sm:p-5 space-y-4">
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                    <h2 id="lbl-expenses-title" class="text-base sm:text-lg font-bold text-white"></h2>
+                    <div class="text-xs sm:text-sm font-bold text-rose-300 bg-rose-950/60 border border-rose-800/60 px-3.5 py-1.5 rounded-xl tabular-nums">
+                        <span id="lbl-total-expenses-inline"></span>: <span id="expenses-total-value">0</span>
+                    </div>
+                </div>
+                <form id="add-expense-form" onsubmit="handleAddExpense(event)" class="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                    <div class="sm:col-span-2">
+                        <label id="lbl-expense-desc" class="block text-xs text-slate-400 mb-1"></label>
+                        <input type="text" id="expense-desc" required class="w-full rounded-xl bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-white focus:outline-none focus:border-rose-500">
+                    </div>
+                    <div>
+                        <label id="lbl-expense-amount" class="block text-xs text-slate-400 mb-1"></label>
+                        <input type="number" id="expense-amount" min="250" step="250" required class="w-full rounded-xl bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-white focus:outline-none focus:border-rose-500">
+                    </div>
+                    <div class="flex items-end">
+                        <button type="submit" id="btn-add-expense" class="w-full px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-sm font-bold transition"></button>
+                    </div>
+                </form>
+            </div>
+
+            <div id="expenses-list" class="space-y-2.5"></div>
+        </section>
+
+        <!-- TAB 3: PAYMENTS & APPROVAL -->
+        <section id="section-payments" class="hidden space-y-4">
+            <!-- Unapproved Payments Total (Expenses Deducted, Resets to 0 After Approval) -->
+            <div class="rounded-2xl bg-gradient-to-l from-amber-950/80 to-slate-900 border border-amber-700/60 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                    <p id="lbl-unapproved-total" class="text-xs sm:text-sm font-semibold text-amber-300"></p>
+                    <p id="unapproved-net-total" class="text-2xl sm:text-3xl font-extrabold text-white mt-1 tabular-nums">0</p>
+                    <p id="lbl-unapproved-breakdown" class="text-xs text-slate-300 mt-1 tabular-nums"></p>
+                </div>
+                <div id="owner-approve-all-wrap" class="hidden">
+                    <button type="button" id="btn-approve-all" onclick="approveAllPayments()" class="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold shadow transition"></button>
+                </div>
+            </div>
+
+            <!-- Payments List -->
+            <div id="payments-list" class="space-y-2.5"></div>
+        </section>
+
+        <!-- TAB 4: OWNER ARCHIVE (DAY & MONTH CALENDAR + EDITABLE) -->
+        <section id="section-archive" class="hidden space-y-4">
+            <div class="rounded-2xl bg-slate-900 border border-slate-800 p-4 sm:p-5 space-y-4">
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div>
+                        <h2 id="lbl-archive-title" class="text-base sm:text-lg font-bold text-white"></h2>
+                        <p id="lbl-archive-subtitle" class="text-xs text-slate-400 mt-0.5"></p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button type="button" id="btn-archive-day" onclick="setArchiveView('day')" class="px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold bg-sky-600 text-white transition"></button>
+                        <button type="button" id="btn-archive-month" onclick="setArchiveView('month')" class="px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold bg-slate-800 text-slate-200 border border-slate-700 transition"></button>
+                    </div>
+                </div>
+
+                <!-- Day Calendar View -->
+                <div id="archive-day-panel" class="space-y-4">
+                    <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+                        <label id="lbl-select-date" class="text-xs sm:text-sm font-semibold text-slate-300"></label>
+                        <input type="date" id="archive-date-picker" onchange="renderArchive()" class="rounded-xl bg-slate-950 border border-slate-700 px-3.5 py-2 text-sm text-white focus:outline-none focus:border-sky-500">
+                    </div>
+                    <div id="archive-day-content" class="space-y-3"></div>
+                </div>
+
+                <!-- Month Calendar View -->
+                <div id="archive-month-panel" class="hidden space-y-4">
+                    <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+                        <label id="lbl-select-month" class="text-xs sm:text-sm font-semibold text-slate-300"></label>
+                        <input type="month" id="archive-month-picker" onchange="renderArchive()" class="rounded-xl bg-slate-950 border border-slate-700 px-3.5 py-2 text-sm text-white focus:outline-none focus:border-sky-500">
+                    </div>
+                    <div id="archive-month-content" class="space-y-3"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 5: OWNER SETTINGS -->
+        <section id="section-settings" class="hidden space-y-4">
+            <div class="rounded-2xl bg-slate-900 border border-slate-800 p-4 sm:p-5 space-y-4">
+                <h2 id="lbl-settings-title" class="text-base sm:text-lg font-bold text-white"></h2>
+                <form id="settings-form" onsubmit="handleSaveSettings(event)" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div class="lg:col-span-2">
+                        <label id="lbl-set-gen-name" class="block text-xs text-slate-400 mb-1"></label>
+                        <input type="text" id="set-gen-name" required class="w-full rounded-xl bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500">
+                    </div>
+                    <div>
+                        <label id="lbl-set-month" class="block text-xs text-slate-400 mb-1"></label>
+                        <input type="text" id="set-month" required class="w-full rounded-xl bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500">
+                    </div>
+                    <div>
+                        <label id="lbl-set-pin" class="block text-xs text-slate-400 mb-1"></label>
+                        <input type="text" id="set-pin" maxlength="6" required class="w-full rounded-xl bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500">
+                    </div>
+                    <div>
+                        <label id="lbl-set-amp-price" class="block text-xs text-slate-400 mb-1"></label>
+                        <input type="number" id="set-amp-price" min="500" step="250" required class="w-full rounded-xl bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500">
+                    </div>
+                    <div>
+                        <label id="lbl-set-base-days" class="block text-xs text-slate-400 mb-1"></label>
+                        <input type="number" id="set-base-days" min="1" max="31" required class="w-full rounded-xl bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500">
+                    </div>
+                    <div class="sm:col-span-2 flex items-end gap-3 flex-wrap">
+                        <button type="submit" id="btn-save-settings" class="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-sm font-bold transition"></button>
+                        <button type="button" id="btn-reset-demo" onclick="resetDemoData()" class="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-rose-300 border border-slate-700 text-sm font-semibold transition"></button>
+                    </div>
+                </form>
+            </div>
+        </section>
+    </main>
+
+    <!-- PIN Modal for Owner -->
+    <div id="pin-modal" class="fixed inset-0 z-50 hidden bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="w-full max-w-sm rounded-2xl bg-slate-900 border border-slate-700 p-5 space-y-4">
+            <h3 id="lbl-pin-title" class="text-base font-bold text-white"></h3>
+            <p id="lbl-pin-desc" class="text-xs text-slate-400"></p>
+            <input type="password" id="pin-input" maxlength="6" class="w-full rounded-xl bg-slate-950 border border-slate-700 px-3.5 py-2.5 text-center text-lg tracking-widest text-white focus:outline-none focus:border-amber-500">
+            <div class="flex items-center justify-end gap-2">
+                <button type="button" id="btn-pin-cancel" onclick="closePinModal()" class="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs sm:text-sm font-semibold"></button>
+                <button type="button" id="btn-pin-confirm" onclick="handleVerifyPin()" class="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs sm:text-sm font-bold"></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Collect / Edit Payment Modal -->
+    <div id="payment-modal" class="fixed inset-0 z-50 hidden bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="w-full max-w-md rounded-2xl bg-slate-900 border border-slate-700 p-5 space-y-4">
+            <div class="flex items-center justify-between">
+                <h3 id="lbl-payment-modal-title" class="text-base font-bold text-white"></h3>
+                <button type="button" onclick="closePaymentModal()" class="text-slate-400 hover:text-white text-lg">✕</button>
+            </div>
+            <div id="payment-sub-summary" class="rounded-xl bg-slate-950 border border-slate-800 p-3 text-xs text-slate-300 space-y-1"></div>
+            <form onsubmit="handleSubmitPayment(event)" class="space-y-3">
+                <div>
+                    <label id="lbl-payment-amount" class="block text-xs text-slate-400 mb-1"></label>
+                    <input type="number" id="payment-amount-input" min="250" step="250" required class="w-full rounded-xl bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500">
+                </div>
+                <div>
+                    <label id="lbl-payment-note" class="block text-xs text-slate-400 mb-1"></label>
+                    <input type="text" id="payment-note-input" class="w-full rounded-xl bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500">
+                </div>
+                <!-- Optional Print Receipt Toggle -->
+                <label class="flex items-center gap-2.5 text-xs sm:text-sm text-slate-200 cursor-pointer pt-1">
+                    <input type="checkbox" id="payment-print-checkbox" class="w-4 h-4 rounded accent-emerald-500">
+                    <span id="lbl-optional-print"></span>
+                </label>
+                <div class="flex items-center justify-end gap-2 pt-2">
+                    <button type="button" id="btn-payment-cancel" onclick="closePaymentModal()" class="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs sm:text-sm font-semibold"></button>
+                    <button type="submit" id="btn-payment-save" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-bold"></button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Subscriber Modal (Owner) -->
+    <div id="edit-sub-modal" class="fixed inset-0 z-50 hidden bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="w-full max-w-md rounded-2xl bg-slate-900 border border-slate-700 p-5 space-y-4">
+            <div class="flex items-center justify-between">
+                <h3 id="lbl-edit-sub-title" class="text-base font-bold text-white"></h3>
+                <button type="button" onclick="closeEditSubscriberModal()" class="text-slate-400 hover:text-white text-lg">✕</button>
+            </div>
+            <form onsubmit="handleSaveSubscriberEdit(event)" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                    <label id="lbl-edit-sub-code" class="block text-xs text-slate-400 mb-1"></label>
+                    <input type="text" id="edit-sub-code" required class="w-full rounded-xl bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-white">
+                </div>
+                <div>
+                    <label id="lbl-edit-sub-phone" class="block text-xs text-slate-400 mb-1"></label>
+                    <input type="text" id="edit-sub-phone" class="w-full rounded-xl bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-white">
+                </div>
+                <div class="sm:col-span-2">
+                    <label id="lbl-edit-sub-name" class="block text-xs text-slate-400 mb-1"></label>
+                    <input type="text" id="edit-sub-name" required class="w-full rounded-xl bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-white">
+                </div>
+                <div>
+                    <label id="lbl-edit-sub-amps" class="block text-xs text-slate-400 mb-1"></label>
+                    <input type="number" id="edit-sub-amps" min="0" step="0.5" required class="w-full rounded-xl bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-white">
+                </div>
+                <div>
+                    <label id="lbl-edit-sub-days" class="block text-xs text-slate-400 mb-1"></label>
+                    <input type="number" id="edit-sub-days" min="1" max="31" required class="w-full rounded-xl bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-white">
+                </div>
+                <div class="sm:col-span-2">
+                    <label id="lbl-edit-sub-prev-debt" class="block text-xs text-slate-400 mb-1"></label>
+                    <input type="number" id="edit-sub-prev-debt" min="0" step="250" required class="w-full rounded-xl bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-white">
+                </div>
+                <div class="sm:col-span-2 flex items-center justify-end gap-2 pt-2">
+                    <button type="button" id="btn-edit-sub-cancel" onclick="closeEditSubscriberModal()" class="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs sm:text-sm font-semibold"></button>
+                    <button type="submit" id="btn-edit-sub-save" class="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs sm:text-sm font-bold"></button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Printable Receipt Container (Hidden unless printed) -->
+    <div id="print-receipt-area" class="hidden"></div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-6 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const STORAGE_KEY = 'molida_accounting_stable_v2';
+        const SYNC_CHANNEL_NAME = 'molida_live_sync_v2';
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const rawFirebaseConfig = typeof __firebase_config !== 'undefined' ? __firebase_config : '';
+
+        function getTodayISO() {
+            const now = new Date();
+            return now.toISOString().slice(0, 10);
+        }
+
+        function getCurrentMonthISO() {
+            const now = new Date();
+            return now.toISOString().slice(0, 7);
+        }
+
+        function getSessionRoomId() {
+            try {
+                const params = new URLSearchParams(window.location.search);
+                const room = params.get('room');
+                if (room && room.trim()) return room.trim();
+                const hashMatch = window.location.hash.match(/room=([a-zA-Z0-9_-]+)/);
+                if (hashMatch && hashMatch[1]) return hashMatch[1];
+            } catch (err) {
+                // Ignore URL parse error
+            }
+            return 'main-generator';
+        }
+
+        const SESSION_ROOM_ID = getSessionRoomId();
+        const CLIENT_INSTANCE_ID = 'client_' + Math.random().toString(36).slice(2, 10);
+
+        let syncChannel = null;
+        let isApplyingRemoteUpdate = false;
+        let lastSyncTimestamp = 0;
+        let db = null;
+        let auth = null;
+        let cloudDocRef = null;
+        let isCloudReady = false;
+        let cloudSaveTimer = null;
+
+        const TRANSLATIONS = {
+            ckb: {
+                appTitle: 'حیساباتی مۆلیدە',
+                appSubtitle: 'سیستەمی بەڕێوەبردن و ژمێریاری بەشداربووانی مۆلیدە',
+                accountant: 'ژمێریار',
+                owner: 'خاوەن مۆلیدە',
+                ownerBanner: 'دۆخی خاوەن مۆلیدە چالاکە: دەستکاری بەشداربووان، پەسەندکردنی پارەدان، گەڕاندنەوە، ئەرشیف و داخستنی مانگ.',
+                closeMonth: 'داخستنی مانگ',
+                tabSubscribers: 'بەشداربووان',
+                tabExpenses: 'خەرجییەکان',
+                tabPayments: 'پارەدان و پەسەندکردن',
+                tabArchive: 'ئەرشیف (ڕۆژ و مانگ)',
+                tabSettings: 'ڕێکخستن',
+                addSubscriber: 'زیادکردنی بەشداربووی نوێ',
+                subCode: 'کۆد',
+                subName: 'ناوی بەشداربوو',
+                subPhone: 'مۆبایل (واتسئەپ)',
+                subAmps: 'ئەمپێر',
+                subDays: 'ڕۆژ',
+                subPrevDebt: 'قەرزی پێشوو',
+                btnAddSub: 'زیادکردن',
+                excelImportTitle: 'زیادکردنی بەشداربووان بە فایلی ئێکسل (Excel / CSV)',
+                excelImportDesc: 'ستوونەکان: کۆد (code)، ناو (name)، مۆبایل (phone)، ئەمپێر (amps)، ڕۆژ (days)، قەرزی پێشوو (previousDebt)',
+                btnDownloadTemplate: 'نموونەی ئێکسل',
+                btnImportExcel: 'هەڵبژاردنی فایلی ئێکسل',
+                excelImportedToast: 'بەشداربووان بە سەرکەوتوویی لە ئێکسلەوە زیاد کران: {count}',
+                excelNoRowsToast: 'هیچ بەشداربوویەک لە فایلەکەدا نەدۆزرایەوە',
+                excelErrorToast: 'هەڵەیەک لە خوێندنەوەی فایلی ئێکسل ڕوویدا',
+                searchPlaceholder: 'گەڕان بە ناو یان کۆد یان مۆبایل...',
+                filterAll: 'هەموو دۆخەکان',
+                filterPaid: 'دراو (سەوز)',
+                filterUnpaid: 'نەدراو (سووری تۆخ)',
+                filterInactive: 'ناچالاک (ڕەش)',
+                sortCode: 'بەپێی کۆد',
+                sortName: 'بەپێی ناو',
+                sortAmps: 'بەپێی ئەمپێر',
+                sortRemaining: 'بەپێی ماوە',
+                sortStatus: 'بەپێی دۆخ',
+                legendPaid: 'دراو',
+                legendUnpaid: 'نەدراو / ماوە',
+                legendInactive: 'ناچالاک',
+                ampsLabel: 'ئەمپێر',
+                daysLabel: 'ڕۆژ',
+                totalDueLabel: 'کۆی داواکراو',
+                paidLabel: 'دراو',
+                remainingLabel: 'ماوە',
+                collectBtn: 'وەرگرتنی پارە',
+                whatsappWarnBtn: 'نامەی ئاگادارکردنەوە',
+                editSubBtn: 'دەستکاری',
+                activateBtn: 'چالاککردن',
+                deactivateBtn: 'ناچالاککردن',
+                statusPaid: 'دراو',
+                statusUnpaid: 'نەدراو',
+                statusInactive: 'ناچالاک',
+                expensesTitle: 'خەرجییەکانی مۆلیدە',
+                totalExpensesInline: 'کۆی خەرجی',
+                expenseDesc: 'جۆر یان وەسفی خەرجی',
+                expenseAmount: 'بڕی خەرجی (د.ع)',
+                btnAddExpense: 'تۆمارکردنی خەرجی',
+                deleteBtn: 'سڕینەوە',
+                unapprovedTotal: 'تۆتاڵی پارەی پەسەندنەکراو (دوای کەمکردنەوەی خەرجییەکان)',
+                unapprovedBreakdown: 'کۆی پارەدانە پەسەندنەکراوەکان: {unapproved} | کۆی خەرجییەکان: {expenses}',
+                btnApproveAll: 'پەسەندکردنی هەمووی',
+                btnApproveOne: 'پەسەندکردن',
+                btnEditPayment: 'دەستکاری پارەدان',
+                btnRevertUnpaid: 'گەڕاندنەوە بۆ نەدراو',
+                approvedBadge: 'پەسەندکراو',
+                pendingBadge: 'چاوەڕوانی پەسەندکردن',
+                pinTitle: 'پشکنینی کۆدی نهێنی خاوەن مۆلیدە',
+                pinDesc: 'کۆدی نهێنی (PIN) بنووسە بۆ چوونە ناو دۆخی خاوەن مۆلیدە (پێشگری: 1234)',
+                pinCancel: 'پاشگەزبوونەوە',
+                pinConfirm: 'چوونە ژوورەوە',
+                wrongPin: 'کۆدی نهێنی هەڵەیە',
+                paymentModalTitle: 'تۆمارکردنی / دەستکاری پارەدان',
+                paymentAmount: 'بڕی پارە (د.ع)',
+                paymentNote: 'تێبینی (ئارەزوومەندانە)',
+                optionalPrint: 'پرینتکردنی وەسڵ (ئارەزوومەندانە)',
+                paymentCancel: 'داخستن',
+                paymentSave: 'پاشەکەوتکردن',
+                editSubTitle: 'دەستکاری زانیاری بەشداربوو',
+                editSubSave: 'نوێکردنەوەی بەشداربوو',
+                archiveTitle: 'ئەرشیفی مۆلیدە (تقویمی ڕۆژ و مانگ)',
+                archiveSubtitle: 'بینین و دەستکاری (تعدیل) تۆمارەکانی ڕۆژ و مانگ',
+                btnArchiveDay: 'تقویمی ڕۆژ',
+                btnArchiveMonth: 'تقویمی مانگ',
+                selectDate: 'هەڵبژاردنی ڕۆژ:',
+                selectMonth: 'هەڵبژاردنی مانگ:',
+                settingsTitle: 'ڕێکخستنەکانی مۆلیدە',
+                setGenName: 'ناوی مۆلیدە',
+                setMonth: 'مانگی ئێستا',
+                setPin: 'کۆدی نهێنی خاوەن مۆلیدە (PIN)',
+                setAmpPrice: 'نرخی ١ ئەمپێر بۆ مانگی تەواو (د.ع)',
+                setBaseDays: 'بنەمای ژمارەی ڕۆژەکانی مانگ',
+                btnSaveSettings: 'پاشەکەوتکردنی ڕێکخستن',
+                btnResetDemo: 'گەڕاندنەوە بۆ داتای سەرەتایی',
+                currency: 'د.ع',
+                linkCopied: 'لینکی هاوبەشی ڕاستەوخۆ کۆپی کرا',
+                savedToast: 'بە سەرکەوتوویی پاشەکەوت کرا',
+                approvedToast: 'پارەدان پەسەند کرا',
+                revertedToast: 'پارەدان گەڕێندرایەوە بۆ دۆخی نەدراو',
+                monthClosedToast: 'مانگ داخرا و پارە نەدراوەکان گواسترانەوە بۆ مانگی داهاتوو',
+                noItems: 'هیچ تۆمارێک نییە',
+                editRecordBtn: 'تعدیل / دەستکاری'
+            },
+            ar: {
+                appTitle: 'حسابات المولدة',
+                appSubtitle: 'نظام إدارة ومحاسبة مشتركي المولدة',
+                accountant: 'المحاسب',
+                owner: 'صاحب المولدة',
+                ownerBanner: 'وضع صاحب المولدة نشط: تعديل المشتركين، اعتماد الدفعات، الإرجاع، الأرشيف وإغلاق الشهر.',
+                closeMonth: 'إغلاق الشهر',
+                tabSubscribers: 'المشتركون',
+                tabExpenses: 'المصاريف',
+                tabPayments: 'الدفعات والاعتماد',
+                tabArchive: 'الأرشيف (يوم وشهر)',
+                tabSettings: 'الإعدادات',
+                addSubscriber: 'إضافة مشترك جديد',
+                subCode: 'الرمز',
+                subName: 'اسم المشترك',
+                subPhone: 'الهاتف (واتساب)',
+                subAmps: 'الأمبير',
+                subDays: 'الأيام',
+                subPrevDebt: 'دين سابق',
+                btnAddSub: 'إضافة',
+                excelImportTitle: 'إضافة المشتركين عبر ملف إكسل (Excel / CSV)',
+                excelImportDesc: 'الأعمدة: الرمز (code)، الاسم (name)، الهاتف (phone)، الأمبير (amps)، الأيام (days)، دين سابق (previousDebt)',
+                btnDownloadTemplate: 'نموذج إكسل',
+                btnImportExcel: 'اختيار ملف إكسل',
+                excelImportedToast: 'تمت إضافة المشتركين من ملف الإكسل بنجاح: {count}',
+                excelNoRowsToast: 'لم يتم العثور على مشتركين في الملف',
+                excelErrorToast: 'حدث خطأ أثناء قراءة ملف الإكسل',
+                searchPlaceholder: 'بحث بالاسم أو الرمز أو الهاتف...',
+                filterAll: 'جميع الحالات',
+                filterPaid: 'مدفوع (أخضر)',
+                filterUnpaid: 'غير مدفوع (أحمر داكن)',
+                filterInactive: 'متوقف (أسود)',
+                sortCode: 'حسب الرمز',
+                sortName: 'حسب الاسم',
+                sortAmps: 'حسب الأمبير',
+                sortRemaining: 'حسب المتبقي',
+                sortStatus: 'حسب الحالة',
+                legendPaid: 'مدفوع',
+                legendUnpaid: 'غير مدفوع / متبقي',
+                legendInactive: 'متوقف',
+                ampsLabel: 'أمبير',
+                daysLabel: 'يوم',
+                totalDueLabel: 'إجمالي المطلوب',
+                paidLabel: 'المدفوع',
+                remainingLabel: 'المتبقي',
+                collectBtn: 'استلام دفعة',
+                whatsappWarnBtn: 'رسالة تنبيه',
+                editSubBtn: 'تعديل',
+                activateBtn: 'تفعيل',
+                deactivateBtn: 'إيقاف',
+                statusPaid: 'مدفوع',
+                statusUnpaid: 'غير مدفوع',
+                statusInactive: 'متوقف',
+                expensesTitle: 'مصاريف المولدة',
+                totalExpensesInline: 'إجمالي المصاريف',
+                expenseDesc: 'وصف المصروف',
+                expenseAmount: 'مبلغ المصروف (د.ع)',
+                btnAddExpense: 'تسجيل مصروف',
+                deleteBtn: 'حذف',
+                unapprovedTotal: 'إجمالي الدفعات غير المعتمدة (بعد خصم المصاريف)',
+                unapprovedBreakdown: 'الدفعات غير المعتمدة: {unapproved} | المصاريف: {expenses}',
+                btnApproveAll: 'اعتماد الكل',
+                btnApproveOne: 'اعتماد',
+                btnEditPayment: 'تعديل الدفعة',
+                btnRevertUnpaid: 'إرجاع إلى غير مدفوع',
+                approvedBadge: 'معتمد',
+                pendingBadge: 'بانتظار الاعتماد',
+                pinTitle: 'رمز الدخول لصاحب المولدة',
+                pinDesc: 'أدخل رمز PIN للدخول كصاحب مولدة (الافتراضي: 1234)',
+                pinCancel: 'إلغاء',
+                pinConfirm: 'دخول',
+                wrongPin: 'رمز PIN غير صحيح',
+                paymentModalTitle: 'تسجيل / تعديل دفعة',
+                paymentAmount: 'المبلغ (د.ع)',
+                paymentNote: 'ملاحظة (اختياري)',
+                optionalPrint: 'طباعة وصل (اختياري)',
+                paymentCancel: 'إغلاق',
+                paymentSave: 'حفظ',
+                editSubTitle: 'تعديل بيانات المشترك',
+                editSubSave: 'تحديث المشترك',
+                archiveTitle: 'أرشيف المولدة (تقويم اليوم والشهر)',
+                archiveSubtitle: 'عرض وتعديل سجلات الأيام والأشهر',
+                btnArchiveDay: 'تقويم اليوم',
+                btnArchiveMonth: 'تقويم الشهر',
+                selectDate: 'اختر اليوم:',
+                selectMonth: 'اختر الشهر:',
+                settingsTitle: 'إعدادات المولدة',
+                setGenName: 'اسم المولدة',
+                setMonth: 'الشهر الحالي',
+                setPin: 'رمز PIN لصاحب المولدة',
+                setAmpPrice: 'سعر 1 أمبير للشهر الكامل (د.ع)',
+                setBaseDays: 'عدد أيام الشهر الأساسي',
+                btnSaveSettings: 'حفظ الإعدادات',
+                btnResetDemo: 'استعادة البيانات الافتراضية',
+                currency: 'د.ع',
+                linkCopied: 'تم نسخ رابط المشاركة المباشرة',
+                savedToast: 'تم الحفظ بنجاح',
+                approvedToast: 'تم اعتماد الدفعة',
+                revertedToast: 'تم إرجاع الدفعة إلى غير مدفوع',
+                monthClosedToast: 'تم إغلاق الشهر وترحيل المبالغ غير المدفوعة إلى الشهر التالي',
+                noItems: 'لا توجد سجلات',
+                editRecordBtn: 'تعديل'
+            }
+        };
+
+        function createInitialState() {
+            const today = getTodayISO();
+            const monthKey = getCurrentMonthISO();
+            return {
+                lang: 'ckb',
+                role: 'accountant',
+                activeTab: 'subscribers',
+                archiveView: 'day',
+                selectedArchiveDate: today,
+                selectedArchiveMonth: monthKey,
+                settings: {
+                    generatorName: 'مۆلیدەی نوور',
+                    currentMonthLabel: 'مانگی ١١ - ٢٠٢٦',
+                    ampPrice: 12000,
+                    baseDays: 30,
+                    ownerPin: '1234'
+                },
+                subscribers: [
+                    { id: 's1', code: 'A-01', name: 'ئازاد محەمەد', phone: '07701112233', amps: 5, days: 30, previousDebt: 0, active: true },
+                    { id: 's2', code: 'A-02', name: 'هێمن کەریم', phone: '07704445566', amps: 10, days: 20, previousDebt: 5000, active: true },
+                    { id: 's3', code: 'A-03', name: 'سارا عەلی', phone: '07707778899', amps: 6, days: 30, previousDebt: 0, active: true },
+                    { id: 's4', code: 'A-04', name: 'بەختیار قادر', phone: '07702223344', amps: 8, days: 30, previousDebt: 0, active: false }
+                ],
+                payments: [
+                    {
+                        id: 'p1',
+                        subscriberId: 's1',
+                        subscriberName: 'ئازاد محەمەد',
+                        subscriberCode: 'A-01',
+                        amount: 60000,
+                        note: 'پارەی مانگ',
+                        date: today,
+                        approved: true
+                    },
+                    {
+                        id: 'p2',
+                        subscriberId: 's2',
+                        subscriberName: 'هێمن کەریم',
+                        subscriberCode: 'A-02',
+                        amount: 40000,
+                        note: 'بەشێک لە پارە (٢٠ ڕۆژ)',
+                        date: today,
+                        approved: false
+                    }
+                ],
+                expenses: [
+                    {
+                        id: 'e1',
+                        description: 'گازوایل بۆ مۆلیدە',
+                        amount: 25000,
+                        date: today
+                    }
+                ],
+                dailyArchive: {},
+                monthlyArchive: {}
+            };
+        }
+
+        function loadInitialState() {
+            const fallback = createInitialState();
+            try {
+                const liveRaw = localStorage.getItem(`${STORAGE_KEY}__live_${SESSION_ROOM_ID}`);
+                if (liveRaw) {
+                    const parsedLive = JSON.parse(liveRaw);
+                    if (parsedLive && parsedLive.data) {
+                        lastSyncTimestamp = Number(parsedLive.updatedAt) || 0;
+                        return { ...fallback, ...parsedLive.data, settings: { ...fallback.settings, ...(parsedLive.data.settings || {}) } };
+                    }
+                }
+                const localRaw = localStorage.getItem(STORAGE_KEY);
+                if (localRaw) {
+                    const parsedLocal = JSON.parse(localRaw);
+                    return { ...fallback, ...parsedLocal, settings: { ...fallback.settings, ...(parsedLocal.settings || {}) } };
+                }
+            } catch (err) {
+                // Fallback to default state
+            }
+            return fallback;
+        }
+
+        let state = loadInitialState();
+        let pendingPaymentSubscriberId = null;
+        let pendingEditingPaymentId = null;
+        let pendingEditingSubscriberId = null;
+
+        try {
+            if (typeof BroadcastChannel !== 'undefined') {
+                syncChannel = new BroadcastChannel(`${SYNC_CHANNEL_NAME}_${SESSION_ROOM_ID}`);
+                syncChannel.onmessage = (event) => {
+                    const payload = event?.data;
+                    if (!payload || payload.senderId === CLIENT_INSTANCE_ID) return;
+                    if (payload.type === 'state_update' && payload.state) {
+                        applyRemoteState(payload.state, payload.updatedAt || Date.now());
+                    }
+                };
+            }
+        } catch (err) {
+            syncChannel = null;
+        }
+
+        function applyRemoteState(remoteData, remoteTimestamp = Date.now()) {
+            const ts = Number(remoteTimestamp) || Date.now();
+            if (ts < lastSyncTimestamp) return;
+            lastSyncTimestamp = ts;
+            isApplyingRemoteUpdate = true;
+            try {
+                const currentRole = state.role;
+                const currentTab = state.activeTab;
+                state = {
+                    ...state,
+                    ...remoteData,
+                    role: currentRole,
+                    activeTab: currentTab,
+                    settings: {
+                        ...state.settings,
+                        ...(remoteData.settings || {})
+                    }
+                };
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+                renderAll();
+            } finally {
+                isApplyingRemoteUpdate = false;
+            }
+        }
+
+        function saveState() {
+            try {
+                const updatedAt = Date.now();
+                lastSyncTimestamp = updatedAt;
+                const envelope = {
+                    roomId: SESSION_ROOM_ID,
+                    updatedAt,
+                    senderId: CLIENT_INSTANCE_ID,
+                    data: state
+                };
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+                localStorage.setItem(`${STORAGE_KEY}__live_${SESSION_ROOM_ID}`, JSON.stringify(envelope));
+
+                if (!isApplyingRemoteUpdate && syncChannel) {
+                    syncChannel.postMessage({
+                        type: 'state_update',
+                        roomId: SESSION_ROOM_ID,
+                        updatedAt,
+                        senderId: CLIENT_INSTANCE_ID,
+                        state
+                    });
+                }
+
+                if (!isApplyingRemoteUpdate && isCloudReady && cloudDocRef) {
+                    scheduleCloudSave(envelope);
+                }
+            } catch (err) {
+                // Ignore storage errors
+            }
+        }
+
+        function scheduleCloudSave(envelope) {
+            if (cloudSaveTimer) clearTimeout(cloudSaveTimer);
+            cloudSaveTimer = setTimeout(async () => {
+                try {
+                    if (!auth?.currentUser || !cloudDocRef) return;
+                    const { role, activeTab, ...sharedData } = envelope.data;
+                    await setDoc(cloudDocRef, {
+                        roomId: SESSION_ROOM_ID,
+                        updatedAt: envelope.updatedAt,
+                        senderId: CLIENT_INSTANCE_ID,
+                        data: sharedData
+                    }, { merge: true });
+                } catch (err) {
+                    // Ignore cloud write error
+                }
+            }, 250);
+        }
+
+        async function initCloudSync() {
+            if (!rawFirebaseConfig) return;
+            try {
+                const firebaseConfig = JSON.parse(rawFirebaseConfig);
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                if (!auth.currentUser) return;
+
+                cloudDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'generator_rooms', SESSION_ROOM_ID);
+                isCloudReady = true;
+
+                onSnapshot(
+                    cloudDocRef,
+                    (snapshot) => {
+                        if (!snapshot.exists()) {
+                            const { role, activeTab, ...initialShared } = state;
+                            setDoc(cloudDocRef, {
+                                roomId: SESSION_ROOM_ID,
+                                updatedAt: Date.now(),
+                                senderId: CLIENT_INSTANCE_ID,
+                                data: initialShared
+                            }, { merge: true }).catch(() => {});
+                            return;
+                        }
+                        const remote = snapshot.data();
+                        if (!remote || remote.senderId === CLIENT_INSTANCE_ID || !remote.data) return;
+                        applyRemoteState(remote.data, remote.updatedAt || Date.now());
+                    },
+                    () => {
+                        // Ignore listener error
+                    }
+                );
+            } catch (err) {
+                isCloudReady = false;
+            }
+        }
+
+        function t(key) {
+            return TRANSLATIONS[state.lang]?.[key] || TRANSLATIONS.ckb[key] || key;
+        }
+
+        function formatMoney(num) {
+            const n = Number(num) || 0;
+            return `${n.toLocaleString('en-US')} ${t('currency')}`;
+        }
+
+        function showToast(msg) {
+            const container = document.getElementById('toast-container');
+            if (!container) return;
+            const el = document.createElement('div');
+            el.className = 'rounded-xl bg-slate-800 border border-slate-600 text-white text-xs sm:text-sm font-semibold px-4 py-2.5 shadow-xl';
+            el.textContent = msg;
+            container.appendChild(el);
+            setTimeout(() => {
+                el.remove();
+            }, 2600);
+        }
+
+        function copyLiveSessionLink() {
+            try {
+                const url = new URL(window.location.href);
+                url.searchParams.set('room', SESSION_ROOM_ID);
+                const text = url.toString();
+                const tempInput = document.createElement('input');
+                tempInput.value = text;
+                document.body.appendChild(tempInput);
+                tempInput.select();
+                document.execCommand('copy');
+                document.body.removeChild(tempInput);
+                showToast(`${t('linkCopied')} (${SESSION_ROOM_ID})`);
+            } catch (err) {
+                showToast(t('linkCopied'));
+            }
+        }
+
+        // Calculate subscriber charge based on pro-rated days + previous debt
+        function calculateSubscriberFinancials(sub) {
+            const ampPrice = Number(state.settings.ampPrice) || 12000;
+            const baseDays = Math.max(1, Number(state.settings.baseDays) || 30);
+            const amps = Number(sub.amps) || 0;
+            const days = Math.max(0, Number(sub.days) || 0);
+            const prevDebt = Number(sub.previousDebt) || 0;
+
+            const currentPeriodCharge = sub.active
+                ? Math.round((amps * ampPrice * days) / baseDays)
+                : 0;
+            const totalDue = currentPeriodCharge + prevDebt;
+
+            const subPayments = state.payments.filter((p) => p.subscriberId === sub.id);
+            const paidAmount = subPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+            const remainingAmount = Math.max(0, totalDue - paidAmount);
+
+            let status = 'unpaid';
+            if (!sub.active && remainingAmount <= 0) {
+                status = 'inactive';
+            } else if (remainingAmount <= 0 && totalDue > 0) {
+                status = 'paid';
+            } else if (!sub.active) {
+                status = 'inactive';
+            } else {
+                status = 'unpaid';
+            }
+
+            return {
+                currentPeriodCharge,
+                totalDue,
+                paidAmount,
+                remainingAmount,
+                status
+            };
+        }
+
+        function switchRole(newRole) {
+            if (newRole === 'owner' && state.role !== 'owner') {
+                const modal = document.getElementById('pin-modal');
+                const input = document.getElementById('pin-input');
+                if (modal && input) {
+                    input.value = '';
+                    modal.classList.remove('hidden');
+                    input.focus();
+                }
+                return;
+            }
+            state.role = newRole;
+            if (newRole === 'accountant' && (state.activeTab === 'archive' || state.activeTab === 'settings')) {
+                state.activeTab = 'subscribers';
+            }
+            renderAll();
+        }
+
+        function closePinModal() {
+            const modal = document.getElementById('pin-modal');
+            if (modal) modal.classList.add('hidden');
+        }
+
+        function handleVerifyPin() {
+            const input = document.getElementById('pin-input');
+            const entered = (input?.value || '').trim();
+            const validPin = String(state.settings.ownerPin || '1234').trim();
+            if (entered === validPin) {
+                state.role = 'owner';
+                closePinModal();
+                renderAll();
+                showToast(`${t('owner')}`);
+            } else {
+                showToast(t('wrongPin'));
+            }
+        }
+
+        function toggleLanguage() {
+            state.lang = state.lang === 'ckb' ? 'ar' : 'ckb';
+            document.documentElement.lang = state.lang;
+            document.documentElement.dir = 'rtl';
+            saveState();
+            renderAll();
+        }
+
+        function switchTab(tabName) {
+            if (state.role === 'accountant' && (tabName === 'archive' || tabName === 'settings')) {
+                tabName = 'subscribers';
+            }
+            state.activeTab = tabName;
+            renderAll();
+        }
+
+        function handleAddSubscriber(event) {
+            event.preventDefault();
+            if (state.role !== 'owner') return;
+
+            const code = document.getElementById('sub-code').value.trim();
+            const name = document.getElementById('sub-name').value.trim();
+            const phone = document.getElementById('sub-phone').value.trim();
+            const amps = Number(document.getElementById('sub-amps').value) || 0;
+            const days = Number(document.getElementById('sub-days').value) || 30;
+            const previousDebt = Number(document.getElementById('sub-prev-debt').value) || 0;
+
+            if (!code || !name) return;
+
+            state.subscribers.unshift({
+                id: 'sub_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+                code,
+                name,
+                phone,
+                amps,
+                days,
+                previousDebt,
+                active: true
+            });
+
+            event.target.reset();
+            document.getElementById('sub-amps').value = '5';
+            document.getElementById('sub-days').value = state.settings.baseDays || '30';
+            document.getElementById('sub-prev-debt').value = '0';
+
+            saveState();
+            renderAll();
+            showToast(t('savedToast'));
+        }
+
+        function normalizeExcelRow(row) {
+            if (!row || typeof row !== 'object') return null;
+            const entries = Object.entries(row).reduce((acc, [k, v]) => {
+                acc[String(k).trim().toLowerCase()] = v;
+                return acc;
+            }, {});
+
+            const codeRaw = entries['code'] ?? entries['کۆد'] ?? entries['الرمز'] ?? '';
+            const nameRaw = entries['name'] ?? entries['ناو'] ?? entries['ناوی بەشداربوو'] ?? entries['الاسم'] ?? entries['اسم المشترك'] ?? '';
+            const phoneRaw = entries['phone'] ?? entries['مۆبایل'] ?? entries['مۆبایل (واتسئەپ)'] ?? entries['الهاتف'] ?? entries['الهاتف (واتساب)'] ?? '';
+            const ampsRaw = entries['amps'] ?? entries['amp'] ?? entries['ئەمپێر'] ?? entries['الأمبير'] ?? state.settings.baseAmps ?? 5;
+            const daysRaw = entries['days'] ?? entries['ڕۆژ'] ?? entries['الأيام'] ?? state.settings.baseDays ?? 30;
+            const prevDebtRaw = entries['previousdebt'] ?? entries['prevdebt'] ?? entries['قەرزی پێشوو'] ?? entries['دين سابق'] ?? 0;
+
+            const name = String(nameRaw || '').trim();
+            if (!name) return null;
+
+            const code = String(codeRaw || '').trim() || `SUB-${Math.floor(100 + Math.random() * 900)}`;
+            const phone = String(phoneRaw || '').trim();
+            const amps = Math.max(0, Number(ampsRaw) || 0);
+            const days = Math.min(31, Math.max(1, Number(daysRaw) || Number(state.settings.baseDays) || 30));
+            const previousDebt = Math.max(0, Number(prevDebtRaw) || 0);
+
+            return {
+                id: 'sub_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+                code,
+                name,
+                phone,
+                amps,
+                days,
+                previousDebt,
+                active: true
+            };
+        }
+
+        function handleImportSubscribersExcel(event) {
+            if (state.role !== 'owner') return;
+            const file = event?.target?.files?.[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    if (typeof XLSX === 'undefined') {
+                        showToast(t('excelErrorToast'));
+                        return;
+                    }
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const firstSheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[firstSheetName];
+                    const rows = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+
+                    const importedSubs = [];
+                    rows.forEach((row) => {
+                        const sub = normalizeExcelRow(row);
+                        if (sub) importedSubs.push(sub);
+                    });
+
+                    if (importedSubs.length === 0) {
+                        showToast(t('excelNoRowsToast'));
+                        return;
+                    }
+
+                    state.subscribers = [...importedSubs, ...state.subscribers];
+                    saveState();
+                    renderAll();
+                    showToast(t('excelImportedToast').replace('{count}', String(importedSubs.length)));
+                } catch (err) {
+                    showToast(t('excelErrorToast'));
+                } finally {
+                    event.target.value = '';
+                }
+            };
+            reader.onerror = () => {
+                showToast(t('excelErrorToast'));
+                event.target.value = '';
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function downloadSubscriberExcelTemplate() {
+            try {
+                if (typeof XLSX === 'undefined') {
+                    showToast(t('excelErrorToast'));
+                    return;
+                }
+                const sampleRows = [
+                    { code: 'B-01', name: 'کاروان ئەحمەد', phone: '07701234567', amps: 5, days: 30, previousDebt: 0 },
+                    { code: 'B-02', name: 'شەهلا حەسەن', phone: '07507654321', amps: 8, days: 25, previousDebt: 5000 }
+                ];
+                const worksheet = XLSX.utils.json_to_sheet(sampleRows);
+                const workbook = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(workbook, worksheet, 'Subscribers');
+                XLSX.writeFile(workbook, 'subscribers_template.xlsx');
+            } catch (err) {
+                showToast(t('excelErrorToast'));
+            }
+        }
+
+        function openEditSubscriberModal(subId) {
+            if (state.role !== 'owner') return;
+            const sub = state.subscribers.find((s) => s.id === subId);
+            if (!sub) return;
+            pendingEditingSubscriberId = subId;
+            document.getElementById('edit-sub-code').value = sub.code || '';
+            document.getElementById('edit-sub-name').value = sub.name || '';
+            document.getElementById('edit-sub-phone').value = sub.phone || '';
+            document.getElementById('edit-sub-amps').value = sub.amps ?? 0;
+            document.getElementById('edit-sub-days').value = sub.days ?? 30;
+            document.getElementById('edit-sub-prev-debt').value = sub.previousDebt ?? 0;
+            document.getElementById('edit-sub-modal').classList.remove('hidden');
+        }
+
+        function closeEditSubscriberModal() {
+            pendingEditingSubscriberId = null;
+            document.getElementById('edit-sub-modal').classList.add('hidden');
+        }
+
+        function handleSaveSubscriberEdit(event) {
+            event.preventDefault();
+            if (state.role !== 'owner' || !pendingEditingSubscriberId) return;
+            const sub = state.subscribers.find((s) => s.id === pendingEditingSubscriberId);
+            if (!sub) return;
+
+            sub.code = document.getElementById('edit-sub-code').value.trim();
+            sub.name = document.getElementById('edit-sub-name').value.trim();
+            sub.phone = document.getElementById('edit-sub-phone').value.trim();
+            sub.amps = Number(document.getElementById('edit-sub-amps').value) || 0;
+            sub.days = Number(document.getElementById('edit-sub-days').value) || 30;
+            sub.previousDebt = Number(document.getElementById('edit-sub-prev-debt').value) || 0;
+
+            state.payments.forEach((p) => {
+                if (p.subscriberId === sub.id) {
+                    p.subscriberName = sub.name;
+                    p.subscriberCode = sub.code;
+                }
+            });
+
+            closeEditSubscriberModal();
+            saveState();
+            renderAll();
+            showToast(t('savedToast'));
+        }
+
+        function editSubscriberDays(subId) {
+            if (state.role !== 'owner') return;
+            openEditSubscriberModal(subId);
+        }
+
+        function toggleSubscriberActive(subId) {
+            if (state.role !== 'owner') return;
+            const sub = state.subscribers.find((s) => s.id === subId);
+            if (!sub) return;
+            sub.active = !sub.active;
+            saveState();
+            renderAll();
+            showToast(t('savedToast'));
+        }
+
+        function sendWhatsAppReceipt(subId) {
+            const sub = state.subscribers.find((s) => s.id === subId);
+            if (!sub) return;
+            const fin = calculateSubscriberFinancials(sub);
+            const cleanPhone = String(sub.phone || '').replace(/[^\d]/g, '');
+            const intlPhone = cleanPhone.startsWith('07') ? '964' + cleanPhone.slice(1) : cleanPhone;
+
+            const message = state.lang === 'ckb'
+                ? `ئاگادارکردنەوە لە ${state.settings.generatorName} (${state.settings.currentMonthLabel})\nبەشداربوو: ${sub.name} (${sub.code})\nئەمپێر: ${sub.amps} | ڕۆژ: ${sub.days}\nکۆی داواکراو: ${formatMoney(fin.totalDue)}\nدراو: ${formatMoney(fin.paidAmount)}\nماوە لەسەر: ${formatMoney(fin.remainingAmount)}\nتکایە پارەی ماوە بە زووترین کات بدەن.`
+                : `رسالة تنبيه من ${state.settings.generatorName} (${state.settings.currentMonthLabel})\nالمشترك: ${sub.name} (${sub.code})\nالأمبير: ${sub.amps} | الأيام: ${sub.days}\nالمطلوب: ${formatMoney(fin.totalDue)}\nالمدفوع: ${formatMoney(fin.paidAmount)}\nالمتبقي: ${formatMoney(fin.remainingAmount)}\nيرجى تسديد المبلغ المتبقي في أقرب وقت.`;
+
+            const url = intlPhone
+                ? `https://wa.me/${intlPhone}?text=${encodeURIComponent(message)}`
+                : `https://wa.me/?text=${encodeURIComponent(message)}`;
+            window.open(url, '_blank', 'noopener,noreferrer');
+        }
+
+        function openCollectModal(subId) {
+            const sub = state.subscribers.find((s) => s.id === subId);
+            if (!sub) return;
+            const fin = calculateSubscriberFinancials(sub);
+
+            pendingPaymentSubscriberId = subId;
+            pendingEditingPaymentId = null;
+
+            document.getElementById('payment-sub-summary').innerHTML = `
+                <div class="font-bold text-white">${sub.code} — ${sub.name}</div>
+                <div>${t('totalDueLabel')}: <span class="font-bold text-amber-300 tabular-nums">${formatMoney(fin.totalDue)}</span> | ${t('remainingLabel')}: <span class="font-bold text-rose-300 tabular-nums">${formatMoney(fin.remainingAmount)}</span></div>
+            `;
+            document.getElementById('payment-amount-input').value = fin.remainingAmount > 0 ? fin.remainingAmount : 5000;
+            document.getElementById('payment-note-input').value = '';
+            document.getElementById('payment-print-checkbox').checked = false;
+            document.getElementById('payment-modal').classList.remove('hidden');
+        }
+
+        function openEditPaymentModal(paymentId) {
+            const payment = state.payments.find((p) => p.id === paymentId);
+            if (!payment) return;
+            if (payment.approved && state.role !== 'owner') return;
+
+            pendingEditingPaymentId = paymentId;
+            pendingPaymentSubscriberId = payment.subscriberId;
+
+            document.getElementById('payment-sub-summary').innerHTML = `
+                <div class="font-bold text-white">${payment.subscriberCode} — ${payment.subscriberName}</div>
+                <div class="text-xs text-slate-400">${payment.date}</div>
+            `;
+            document.getElementById('payment-amount-input').value = payment.amount;
+            document.getElementById('payment-note-input').value = payment.note || '';
+            document.getElementById('payment-print-checkbox').checked = false;
+            document.getElementById('payment-modal').classList.remove('hidden');
+        }
+
+        function closePaymentModal() {
+            pendingPaymentSubscriberId = null;
+            pendingEditingPaymentId = null;
+            document.getElementById('payment-modal').classList.add('hidden');
+        }
+
+        function triggerOptionalPrint(paymentRecord) {
+            const shouldPrint = document.getElementById('payment-print-checkbox')?.checked;
+            if (!shouldPrint) return;
+
+            const printArea = document.getElementById('print-receipt-area');
+            if (!printArea) return;
+
+            printArea.innerHTML = `
+                <div style="max-width: 380px; margin: 0 auto; border: 1px dashed #334155; padding: 18px; border-radius: 10px; direction: rtl;">
+                    <h2 style="margin: 0 0 6px; font-size: 18px;">${state.settings.generatorName}</h2>
+                    <p style="margin: 0 0 12px; font-size: 12px; color: #475569;">${state.settings.currentMonthLabel} • ${paymentRecord.date}</p>
+                    <hr style="border: 0; border-top: 1px solid #cbd5e1; margin: 10px 0;">
+                    <p style="margin: 6px 0; font-size: 14px;"><strong>بەشداربوو / المشترك:</strong> ${paymentRecord.subscriberName} (${paymentRecord.subscriberCode})</p>
+                    <p style="margin: 6px 0; font-size: 15px;"><strong>بڕی وەرگیراو / المبلغ:</strong> ${formatMoney(paymentRecord.amount)}</p>
+                    ${paymentRecord.note ? `<p style="margin: 6px 0; font-size: 13px;"><strong>تێبینی / ملاحظة:</strong> ${paymentRecord.note}</p>` : ''}
+                </div>
+            `;
+            window.print();
+        }
+
+        function handleSubmitPayment(event) {
+            event.preventDefault();
+            const amount = Number(document.getElementById('payment-amount-input').value) || 0;
+            const note = document.getElementById('payment-note-input').value.trim();
+            if (amount <= 0) return;
+
+            if (pendingEditingPaymentId) {
+                const payment = state.payments.find((p) => p.id === pendingEditingPaymentId);
+                if (!payment) return;
+                payment.amount = amount;
+                payment.note = note;
+                const recordCopy = { ...payment };
+                closePaymentModal();
+                saveState();
+                renderAll();
+                triggerOptionalPrint(recordCopy);
+                showToast(t('savedToast'));
+                return;
+            }
+
+            const sub = state.subscribers.find((s) => s.id === pendingPaymentSubscriberId);
+            if (!sub) return;
+
+            const newPayment = {
+                id: 'pay_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+                subscriberId: sub.id,
+                subscriberName: sub.name,
+                subscriberCode: sub.code,
+                amount,
+                note,
+                date: getTodayISO(),
+                approved: false
+            };
+
+            state.payments.unshift(newPayment);
+            closePaymentModal();
+            saveState();
+            renderAll();
+            triggerOptionalPrint(newPayment);
+            showToast(t('savedToast'));
+        }
+
+        function deleteUnapprovedPayment(paymentId) {
+            const payment = state.payments.find((p) => p.id === paymentId);
+            if (!payment) return;
+            if (payment.approved && state.role !== 'owner') return;
+            state.payments = state.payments.filter((p) => p.id !== paymentId);
+            saveState();
+            renderAll();
+            showToast(t('savedToast'));
+        }
+
+        function approveSinglePayment(paymentId) {
+            if (state.role !== 'owner') return;
+            const payment = state.payments.find((p) => p.id === paymentId);
+            if (!payment) return;
+            payment.approved = true;
+            state.expenses = [];
+            saveState();
+            renderAll();
+            showToast(t('approvedToast'));
+        }
+
+        function approveAllPayments() {
+            if (state.role !== 'owner') return;
+            state.payments.forEach((p) => {
+                p.approved = true;
+            });
+            state.expenses = [];
+            saveState();
+            renderAll();
+            showToast(t('approvedToast'));
+        }
+
+        function revertPaymentToUnpaid(paymentId) {
+            if (state.role !== 'owner') return;
+            const payment = state.payments.find((p) => p.id === paymentId);
+            if (!payment) return;
+            payment.approved = false;
+            saveState();
+            renderAll();
+            showToast(t('revertedToast'));
+        }
+
+        function handleAddExpense(event) {
+            event.preventDefault();
+            const desc = document.getElementById('expense-desc').value.trim();
+            const amount = Number(document.getElementById('expense-amount').value) || 0;
+            if (!desc || amount <= 0) return;
+
+            state.expenses.unshift({
+                id: 'exp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+                description: desc,
+                amount,
+                date: getTodayISO()
+            });
+
+            event.target.reset();
+            saveState();
+            renderAll();
+            showToast(t('savedToast'));
+        }
+
+        function deleteExpense(expId) {
+            state.expenses = state.expenses.filter((e) => e.id !== expId);
+            saveState();
+            renderAll();
+            showToast(t('savedToast'));
+        }
+
+        // Close month & carry forward unpaid balances into next month's previousDebt
+        function closeCurrentMonth() {
+            if (state.role !== 'owner') return;
+
+            const monthKey = getCurrentMonthISO();
+            let carriedForwardTotal = 0;
+            let totalPaidInMonth = 0;
+            let totalExpensesInMonth = state.expenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+
+            state.subscribers.forEach((sub) => {
+                const fin = calculateSubscriberFinancials(sub);
+                totalPaidInMonth += fin.paidAmount;
+                const unpaidCarry = fin.remainingAmount;
+                carriedForwardTotal += unpaidCarry;
+                sub.previousDebt = unpaidCarry;
+                sub.days = Number(state.settings.baseDays) || 30;
+            });
+
+            state.monthlyArchive[monthKey] = {
+                monthKey,
+                label: state.settings.currentMonthLabel,
+                closedAt: getTodayISO(),
+                totalPaidInMonth,
+                totalExpensesInMonth,
+                carriedForwardTotal,
+                subscriberCount: state.subscribers.length
+            };
+
+            state.payments = [];
+            state.expenses = [];
+
+            saveState();
+            renderAll();
+            showToast(t('monthClosedToast'));
+        }
+
+        function setArchiveView(view) {
+            state.archiveView = view;
+            renderArchive();
+        }
+
+        function editDailyArchiveRecord(dateKey) {
+            if (state.role !== 'owner') return;
+            const currentVal = state.dailyArchive[dateKey]?.note || '';
+            const updatedNote = prompt(t('editRecordBtn'), currentVal);
+            if (updatedNote === null) return;
+            state.dailyArchive[dateKey] = {
+                ...(state.dailyArchive[dateKey] || { date: dateKey }),
+                note: updatedNote
+            };
+            saveState();
+            renderArchive();
+            showToast(t('savedToast'));
+        }
+
+        function editMonthlyArchiveRecord(monthKey) {
+            if (state.role !== 'owner') return;
+            const rec = state.monthlyArchive[monthKey];
+            if (!rec) return;
+            const currentCarried = Number(rec.carriedForwardTotal) || 0;
+            const nextValRaw = prompt(t('editRecordBtn'), String(currentCarried));
+            if (nextValRaw === null) return;
+            const parsedVal = Number(nextValRaw);
+            if (!Number.isNaN(parsedVal) && parsedVal >= 0) {
+                rec.carriedForwardTotal = parsedVal;
+                saveState();
+                renderArchive();
+                showToast(t('savedToast'));
+            }
+        }
+
+        function handleSaveSettings(event) {
+            event.preventDefault();
+            if (state.role !== 'owner') return;
+
+            state.settings.generatorName = document.getElementById('set-gen-name').value.trim() || 'مۆلیدەی نوور';
+            state.settings.currentMonthLabel = document.getElementById('set-month').value.trim() || state.settings.currentMonthLabel;
+            state.settings.ownerPin = document.getElementById('set-pin').value.trim() || '1234';
+            state.settings.ampPrice = Math.max(500, Number(document.getElementById('set-amp-price').value) || 12000);
+            state.settings.baseDays = Math.min(31, Math.max(1, Number(document.getElementById('set-base-days').value) || 30));
+
+            saveState();
+            renderAll();
+            showToast(t('savedToast'));
+        }
+
+        function resetDemoData() {
+            if (state.role !== 'owner') return;
+            const keepLang = state.lang;
+            state = createInitialState();
+            state.lang = keepLang;
+            state.role = 'owner';
+            saveState();
+            renderAll();
+            showToast(t('savedToast'));
+        }
+
+        function renderStaticTexts() {
+            document.getElementById('app-title').firstChild.textContent = t('appTitle') + ' ';
+            document.getElementById('current-month-badge').textContent = `${state.settings.generatorName} • ${state.settings.currentMonthLabel}`;
+            document.getElementById('app-subtitle').textContent = t('appSubtitle');
+            document.getElementById('lbl-online-status').textContent = `${t('appTitle')} • ${SESSION_ROOM_ID}`;
+
+            const accBtn = document.getElementById('role-accountant-btn');
+            const ownBtn = document.getElementById('role-owner-btn');
+            accBtn.textContent = t('accountant');
+            ownBtn.textContent = t('owner');
+
+            if (state.role === 'owner') {
+                ownBtn.className = 'px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold bg-amber-500 text-slate-950 transition';
+                accBtn.className = 'px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold text-slate-300 hover:text-white transition';
+            } else {
+                accBtn.className = 'px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold bg-emerald-500 text-slate-950 transition';
+                ownBtn.className = 'px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold text-slate-300 hover:text-white transition';
+            }
+
+            document.getElementById('lang-toggle-btn').textContent = state.lang === 'ckb' ? 'عربي' : 'کوردی';
+
+            const ownerBanner = document.getElementById('owner-status-banner');
+            const addSubPanel = document.getElementById('owner-add-subscriber-panel');
+            const tabArchive = document.getElementById('tab-archive');
+            const tabSettings = document.getElementById('tab-settings');
+            const approveAllWrap = document.getElementById('owner-approve-all-wrap');
+
+            if (state.role === 'owner') {
+                ownerBanner.classList.remove('hidden');
+                addSubPanel.classList.remove('hidden');
+                tabArchive.classList.remove('hidden');
+                tabSettings.classList.remove('hidden');
+                approveAllWrap.classList.remove('hidden');
+            } else {
+                ownerBanner.classList.add('hidden');
+                addSubPanel.classList.add('hidden');
+                tabArchive.classList.add('hidden');
+                tabSettings.classList.add('hidden');
+                approveAllWrap.classList.add('hidden');
+            }
+
+            document.getElementById('owner-banner-text').textContent = t('ownerBanner');
+            document.getElementById('btn-close-month').textContent = t('closeMonth');
+
+            document.getElementById('tab-subscribers').textContent = t('tabSubscribers');
+            document.getElementById('tab-expenses').textContent = t('tabExpenses');
+            document.getElementById('tab-payments').textContent = t('tabPayments');
+            document.getElementById('tab-archive').textContent = t('tabArchive');
+            document.getElementById('tab-settings').textContent = t('tabSettings');
+
+            document.querySelectorAll('.tab-btn').forEach((btn) => {
+                const isActive = btn.id === `tab-${state.activeTab}`;
+                btn.className = isActive
+                    ? `${btn.id === 'tab-archive' || btn.id === 'tab-settings' ? (state.role === 'owner' ? '' : 'hidden ') : ''}tab-btn px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap bg-sky-600 text-white shadow transition`
+                    : `${btn.id === 'tab-archive' || btn.id === 'tab-settings' ? (state.role === 'owner' ? '' : 'hidden ') : ''}tab-btn px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 transition`;
+            });
+
+            document.getElementById('section-subscribers').classList.toggle('hidden', state.activeTab !== 'subscribers');
+            document.getElementById('section-expenses').classList.toggle('hidden', state.activeTab !== 'expenses');
+            document.getElementById('section-payments').classList.toggle('hidden', state.activeTab !== 'payments');
+            document.getElementById('section-archive').classList.toggle('hidden', state.activeTab !== 'archive' || state.role !== 'owner');
+            document.getElementById('section-settings').classList.toggle('hidden', state.activeTab !== 'settings' || state.role !== 'owner');
+
+            document.getElementById('lbl-add-subscriber').textContent = t('addSubscriber');
+            document.getElementById('lbl-rate-info').textContent = `${formatMoney(state.settings.ampPrice)} / ${state.settings.baseDays} ${t('daysLabel')}`;
+            document.getElementById('lbl-sub-code').textContent = t('subCode');
+            document.getElementById('lbl-sub-name').textContent = t('subName');
+            document.getElementById('lbl-sub-phone').textContent = t('subPhone');
+            document.getElementById('lbl-sub-amps').textContent = t('subAmps');
+            document.getElementById('lbl-sub-days').textContent = t('subDays');
+            document.getElementById('lbl-sub-prev-debt').textContent = t('subPrevDebt');
+            document.getElementById('btn-add-subscriber').textContent = t('btnAddSub');
+            document.getElementById('lbl-excel-import-title').textContent = t('excelImportTitle');
+            document.getElementById('lbl-excel-import-desc').textContent = t('excelImportDesc');
+            document.getElementById('btn-download-excel-template').textContent = t('btnDownloadTemplate');
+            document.getElementById('btn-import-excel-label').textContent = t('btnImportExcel');
+
+            document.getElementById('search-input').placeholder = t('searchPlaceholder');
+            document.getElementById('opt-filter-all').textContent = t('filterAll');
+            document.getElementById('opt-filter-paid').textContent = t('filterPaid');
+            document.getElementById('opt-filter-unpaid').textContent = t('filterUnpaid');
+            document.getElementById('opt-filter-inactive').textContent = t('filterInactive');
+            document.getElementById('opt-sort-code').textContent = t('sortCode');
+            document.getElementById('opt-sort-name').textContent = t('sortName');
+            document.getElementById('opt-sort-amps').textContent = t('sortAmps');
+            document.getElementById('opt-sort-remaining').textContent = t('sortRemaining');
+            document.getElementById('opt-sort-status').textContent = t('sortStatus');
+
+            document.getElementById('legend-paid').textContent = t('legendPaid');
+            document.getElementById('legend-unpaid').textContent = t('legendUnpaid');
+            document.getElementById('legend-inactive').textContent = t('legendInactive');
+
+            document.getElementById('lbl-expenses-title').textContent = t('expensesTitle');
+            document.getElementById('lbl-total-expenses-inline').textContent = t('totalExpensesInline');
+            document.getElementById('lbl-expense-desc').textContent = t('expenseDesc');
+            document.getElementById('lbl-expense-amount').textContent = t('expenseAmount');
+            document.getElementById('btn-add-expense').textContent = t('btnAddExpense');
+
+            document.getElementById('lbl-unapproved-total').textContent = t('unapprovedTotal');
+            document.getElementById('btn-approve-all').textContent = t('btnApproveAll');
+
+            document.getElementById('lbl-pin-title').textContent = t('pinTitle');
+            document.getElementById('lbl-pin-desc').textContent = t('pinDesc');
+            document.getElementById('btn-pin-cancel').textContent = t('pinCancel');
+            document.getElementById('btn-pin-confirm').textContent = t('pinConfirm');
+
+            document.getElementById('lbl-payment-modal-title').textContent = t('paymentModalTitle');
+            document.getElementById('lbl-payment-amount').textContent = t('paymentAmount');
+            document.getElementById('lbl-payment-note').textContent = t('paymentNote');
+            document.getElementById('lbl-optional-print').textContent = t('optionalPrint');
+            document.getElementById('btn-payment-cancel').textContent = t('paymentCancel');
+            document.getElementById('btn-payment-save').textContent = t('paymentSave');
+
+            document.getElementById('lbl-edit-sub-title').textContent = t('editSubTitle');
+            document.getElementById('lbl-edit-sub-code').textContent = t('subCode');
+            document.getElementById('lbl-edit-sub-phone').textContent = t('subPhone');
+            document.getElementById('lbl-edit-sub-name').textContent = t('subName');
+            document.getElementById('lbl-edit-sub-amps').textContent = t('subAmps');
+            document.getElementById('lbl-edit-sub-days').textContent = t('subDays');
+            document.getElementById('lbl-edit-sub-prev-debt').textContent = t('subPrevDebt');
+            document.getElementById('btn-edit-sub-cancel').textContent = t('paymentCancel');
+            document.getElementById('btn-edit-sub-save').textContent = t('editSubSave');
+
+            document.getElementById('lbl-archive-title').textContent = t('archiveTitle');
+            document.getElementById('lbl-archive-subtitle').textContent = t('archiveSubtitle');
+            document.getElementById('btn-archive-day').textContent = t('btnArchiveDay');
+            document.getElementById('btn-archive-month').textContent = t('btnArchiveMonth');
+            document.getElementById('lbl-select-date').textContent = t('selectDate');
+            document.getElementById('lbl-select-month').textContent = t('selectMonth');
+
+            document.getElementById('lbl-settings-title').textContent = t('settingsTitle');
+            document.getElementById('lbl-set-gen-name').textContent = t('setGenName');
+            document.getElementById('lbl-set-month').textContent = t('setMonth');
+            document.getElementById('lbl-set-pin').textContent = t('setPin');
+            document.getElementById('lbl-set-amp-price').textContent = t('setAmpPrice');
+            document.getElementById('lbl-set-base-days').textContent = t('setBaseDays');
+            document.getElementById('btn-save-settings').textContent = t('btnSaveSettings');
+            document.getElementById('btn-reset-demo').textContent = t('btnResetDemo');
+        }
+
+        function renderSubscribers() {
+            const listEl = document.getElementById('subscribers-list');
+            if (!listEl) return;
+
+            const queryStr = (document.getElementById('search-input')?.value || '').trim().toLowerCase();
+            const statusFilter = document.getElementById('status-filter')?.value || 'all';
+            const sortBy = document.getElementById('sort-select')?.value || 'code';
+
+            let enriched = state.subscribers.map((sub) => ({
+                sub,
+                fin: calculateSubscriberFinancials(sub)
+            }));
+
+            if (queryStr) {
+                enriched = enriched.filter(({ sub }) =>
+                    (sub.name || '').toLowerCase().includes(queryStr) ||
+                    (sub.code || '').toLowerCase().includes(queryStr) ||
+                    (sub.phone || '').toLowerCase().includes(queryStr)
+                );
+            }
+
+            if (statusFilter !== 'all') {
+                enriched = enriched.filter(({ fin }) => fin.status === statusFilter);
+            }
+
+            enriched.sort((a, b) => {
+                if (sortBy === 'name') return (a.sub.name || '').localeCompare(b.sub.name || '', state.lang);
+                if (sortBy === 'amps') return (b.sub.amps || 0) - (a.sub.amps || 0);
+                if (sortBy === 'remaining') return (b.fin.remainingAmount || 0) - (a.fin.remainingAmount || 0);
+                if (sortBy === 'status') return (a.fin.status || '').localeCompare(b.fin.status || '');
+                return (a.sub.code || '').localeCompare(b.sub.code || '', undefined, { numeric: true });
+            });
+
+            if (enriched.length === 0) {
+                listEl.innerHTML = `<div class="rounded-2xl bg-slate-900 border border-slate-800 p-8 text-center text-sm text-slate-400">${t('noItems')}</div>`;
+                return;
+            }
+
+            listEl.innerHTML = enriched.map(({ sub, fin }) => {
+                const cardClass =
+                    fin.status === 'paid'
+                        ? 'sub-card-paid'
+                        : fin.status === 'inactive'
+                            ? 'sub-card-inactive'
+                            : 'sub-card-unpaid';
+
+                const statusBadgeText =
+                    fin.status === 'paid'
+                        ? t('statusPaid')
+                        : fin.status === 'inactive'
+                            ? t('statusInactive')
+                            : t('statusUnpaid');
+
+                const nameClickAttr = state.role === 'owner'
+                    ? `onclick="openEditSubscriberModal('${sub.id}')" title="${t('editSubBtn')}"`
+                    : '';
+                const nameCursorClass = state.role === 'owner'
+                    ? 'cursor-pointer underline decoration-dotted underline-offset-4 hover:text-amber-200'
+                    : '';
+
+                return `
+                    <div class="w-full rounded-2xl border p-4 shadow-md transition flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 ${cardClass}">
+                        <div class="space-y-1.5">
+                            <div class="flex items-center gap-2.5 flex-wrap">
+                                <span class="px-2.5 py-0.5 rounded-lg bg-black/35 text-xs font-extrabold text-white tabular-nums">${sub.code}</span>
+                                <button type="button" ${nameClickAttr} class="text-base font-bold text-white ${nameCursorClass} text-right">${sub.name}</button>
+                                <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-black/30 text-white">${statusBadgeText}</span>
+                                ${sub.phone ? `<span class="text-xs text-white/85 tabular-nums">📞 ${sub.phone}</span>` : ''}
+                            </div>
+                            <div class="flex items-center gap-4 flex-wrap text-xs sm:text-sm text-white/95 tabular-nums">
+                                <span><strong>${t('ampsLabel')}:</strong> ${sub.amps}</span>
+                                <span><strong>${t('daysLabel')}:</strong> ${sub.days}</span>
+                                <span><strong>${t('totalDueLabel')}:</strong> ${formatMoney(fin.totalDue)}</span>
+                                <span><strong>${t('paidLabel')}:</strong> ${formatMoney(fin.paidAmount)}</span>
+                                <span><strong>${t('remainingLabel')}:</strong> ${formatMoney(fin.remainingAmount)}</span>
+                            </div>
+                        </div>
+
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <button type="button" onclick="openCollectModal('${sub.id}')" class="px-3.5 py-2 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs sm:text-sm font-bold border border-white/20 transition">
+                                ${t('collectBtn')}
+                            </button>
+                            <button type="button" onclick="sendWhatsAppReceipt('${sub.id}')" class="px-3.5 py-2 rounded-xl bg-emerald-950/80 hover:bg-emerald-900 text-emerald-200 text-xs sm:text-sm font-bold border border-emerald-500/40 transition">
+                                ${t('whatsappWarnBtn')}
+                            </button>
+                            ${state.role === 'owner' ? `
+                                <button type="button" onclick="openEditSubscriberModal('${sub.id}')" class="px-3 py-2 rounded-xl bg-sky-950/80 hover:bg-sky-900 text-sky-200 text-xs sm:text-sm font-bold border border-sky-500/40 transition">
+                                    ${t('editSubBtn')}
+                                </button>
+                                <button type="button" onclick="toggleSubscriberActive('${sub.id}')" class="px-3 py-2 rounded-xl bg-black/35 hover:bg-black/50 text-white text-xs sm:text-sm font-semibold border border-white/15 transition">
+                                    ${sub.active ? t('deactivateBtn') : t('activateBtn')}
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderExpenses() {
+            const listEl = document.getElementById('expenses-list');
+            const totalExpenses = state.expenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+            const totalValEl = document.getElementById('expenses-total-value');
+            if (totalValEl) totalValEl.textContent = formatMoney(totalExpenses);
+
+            if (!listEl) return;
+            if (state.expenses.length === 0) {
+                listEl.innerHTML = `<div class="rounded-2xl bg-slate-900 border border-slate-800 p-6 text-center text-sm text-slate-400">${t('noItems')}</div>`;
+                return;
+            }
+
+            listEl.innerHTML = state.expenses.map((exp) => `
+                <div class="rounded-2xl bg-slate-900 border border-slate-800 px-4 py-3 flex items-center justify-between gap-3">
+                    <div>
+                        <p class="text-sm font-bold text-white">${exp.description}</p>
+                        <p class="text-xs text-slate-400 tabular-nums">${exp.date}</p>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <span class="text-sm font-extrabold text-rose-400 tabular-nums">-${formatMoney(exp.amount)}</span>
+                        <button type="button" onclick="deleteExpense('${exp.id}')" class="px-3 py-1.5 rounded-xl bg-rose-950/70 hover:bg-rose-900 text-rose-200 text-xs font-bold border border-rose-800/60 transition">
+                            ${t('deleteBtn')}
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Unapproved payments total minus expenses; resets to 0 once approved
+        function renderPaymentsTab() {
+            const unapprovedPayments = state.payments.filter((p) => !p.approved);
+            const unapprovedSum = unapprovedPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+            const expensesSum = state.expenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+            const netUnapprovedTotal = Math.max(0, unapprovedSum - expensesSum);
+
+            const netEl = document.getElementById('unapproved-net-total');
+            const breakdownEl = document.getElementById('lbl-unapproved-breakdown');
+            if (netEl) netEl.textContent = formatMoney(netUnapprovedTotal);
+            if (breakdownEl) {
+                breakdownEl.textContent = t('unapprovedBreakdown')
+                    .replace('{unapproved}', formatMoney(unapprovedSum))
+                    .replace('{expenses}', formatMoney(expensesSum));
+            }
+
+            const listEl = document.getElementById('payments-list');
+            if (!listEl) return;
+
+            if (state.payments.length === 0) {
+                listEl.innerHTML = `<div class="rounded-2xl bg-slate-900 border border-slate-800 p-6 text-center text-sm text-slate-400">${t('noItems')}</div>`;
+                return;
+            }
+
+            listEl.innerHTML = state.payments.map((p) => {
+                const canModifyPending = !p.approved;
+                return `
+                    <div class="rounded-2xl bg-slate-900 border ${p.approved ? 'border-emerald-800/60' : 'border-amber-700/60'} p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <div class="space-y-1">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <span class="text-sm font-bold text-white">${p.subscriberCode} — ${p.subscriberName}</span>
+                                <span class="px-2.5 py-0.5 rounded-full text-xs font-bold ${p.approved ? 'bg-emerald-950 text-emerald-300 border border-emerald-700/60' : 'bg-amber-950 text-amber-300 border border-amber-700/60'}">
+                                    ${p.approved ? t('approvedBadge') : t('pendingBadge')}
+                                </span>
+                            </div>
+                            <p class="text-xs text-slate-400 tabular-nums">${p.date}${p.note ? ` • ${p.note}` : ''}</p>
+                        </div>
+
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span class="text-sm font-extrabold text-emerald-300 tabular-nums px-2">${formatMoney(p.amount)}</span>
+
+                            ${canModifyPending ? `
+                                <button type="button" onclick="openEditPaymentModal('${p.id}')" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-sky-300 text-xs font-bold border border-slate-700 transition">
+                                    ${t('btnEditPayment')}
+                                </button>
+                                <button type="button" onclick="deleteUnapprovedPayment('${p.id}')" class="px-3 py-1.5 rounded-xl bg-rose-950/70 hover:bg-rose-900 text-rose-200 text-xs font-bold border border-rose-800/60 transition">
+                                    ${t('deleteBtn')}
+                                </button>
+                            ` : ''}
+
+                            ${state.role === 'owner' && !p.approved ? `
+                                <button type="button" onclick="approveSinglePayment('${p.id}')" class="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition">
+                                    ${t('btnApproveOne')}
+                                </button>
+                            ` : ''}
+
+                            ${state.role === 'owner' && p.approved ? `
+                                <button type="button" onclick="revertPaymentToUnpaid('${p.id}')" class="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-slate-950 text-xs font-bold transition">
+                                    ${t('btnRevertUnpaid')}
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderArchive() {
+            if (state.role !== 'owner') return;
+
+            const dayPanel = document.getElementById('archive-day-panel');
+            const monthPanel = document.getElementById('archive-month-panel');
+            const btnDay = document.getElementById('btn-archive-day');
+            const btnMonth = document.getElementById('btn-archive-month');
+
+            const datePicker = document.getElementById('archive-date-picker');
+            const monthPicker = document.getElementById('archive-month-picker');
+            if (datePicker && !datePicker.value) datePicker.value = state.selectedArchiveDate || getTodayISO();
+            if (monthPicker && !monthPicker.value) monthPicker.value = state.selectedArchiveMonth || getCurrentMonthISO();
+
+            if (state.archiveView === 'day') {
+                dayPanel.classList.remove('hidden');
+                monthPanel.classList.add('hidden');
+                btnDay.className = 'px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold bg-sky-600 text-white transition';
+                btnMonth.className = 'px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold bg-slate-800 text-slate-200 border border-slate-700 transition';
+
+                const selectedDate = datePicker.value || getTodayISO();
+                const dayPayments = state.payments.filter((p) => p.date === selectedDate);
+                const dayExpenses = state.expenses.filter((e) => e.date === selectedDate);
+                const dayNote = state.dailyArchive[selectedDate]?.note || '';
+
+                const dayPaidSum = dayPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+                const dayExpSum = dayExpenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+
+                document.getElementById('archive-day-content').innerHTML = `
+                    <div class="rounded-2xl bg-slate-950 border border-slate-800 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <div class="space-y-1 text-xs sm:text-sm">
+                            <div class="font-bold text-white tabular-nums">${selectedDate}</div>
+                            <div class="text-emerald-300 tabular-nums">${t('paidLabel')}: ${formatMoney(dayPaidSum)} | ${t('totalExpensesInline')}: ${formatMoney(dayExpSum)}</div>
+                            <div class="text-slate-400">${dayNote || t('noItems')}</div>
+                        </div>
+                        <button type="button" onclick="editDailyArchiveRecord('${selectedDate}')" class="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-slate-950 text-xs font-bold transition">
+                            ${t('editRecordBtn')}
+                        </button>
+                    </div>
+                `;
+            } else {
+                dayPanel.classList.add('hidden');
+                monthPanel.classList.remove('hidden');
+                btnMonth.className = 'px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold bg-sky-600 text-white transition';
+                btnDay.className = 'px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold bg-slate-800 text-slate-200 border border-slate-700 transition';
+
+                const records = Object.values(state.monthlyArchive || {});
+                if (records.length === 0) {
+                    document.getElementById('archive-month-content').innerHTML = `
+                        <div class="rounded-2xl bg-slate-950 border border-slate-800 p-6 text-center text-xs sm:text-sm text-slate-400">
+                            ${t('noItems')}
+                        </div>
+                    `;
+                } else {
+                    document.getElementById('archive-month-content').innerHTML = records.map((rec) => `
+                        <div class="rounded-2xl bg-slate-950 border border-slate-800 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                            <div class="space-y-1 text-xs sm:text-sm">
+                                <div class="font-bold text-white">${rec.label} (${rec.monthKey})</div>
+                                <div class="text-slate-300 tabular-nums">${t('paidLabel')}: ${formatMoney(rec.totalPaidInMonth)} | ${t('totalExpensesInline')}: ${formatMoney(rec.totalExpensesInMonth)}</div>
+                                <div class="text-amber-300 font-semibold tabular-nums">${t('subPrevDebt')}: ${formatMoney(rec.carriedForwardTotal)}</div>
+                            </div>
+                            <button type="button" onclick="editMonthlyArchiveRecord('${rec.monthKey}')" class="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-slate-950 text-xs font-bold transition">
+                                ${t('editRecordBtn')}
+                            </button>
+                        </div>
+                    `).join('');
+                }
+            }
+        }
+
+        function renderSettings() {
+            if (state.role !== 'owner') return;
+            document.getElementById('set-gen-name').value = state.settings.generatorName || '';
+            document.getElementById('set-month').value = state.settings.currentMonthLabel || '';
+            document.getElementById('set-pin').value = state.settings.ownerPin || '1234';
+            document.getElementById('set-amp-price').value = state.settings.ampPrice || 12000;
+            document.getElementById('set-base-days').value = state.settings.baseDays || 30;
+        }
+
+        function renderAll() {
+            renderStaticTexts();
+            renderSubscribers();
+            renderExpenses();
+            renderPaymentsTab();
+            renderArchive();
+            renderSettings();
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            renderAll();
+            initCloudSync();
+        });
+
+        Object.assign(window, {
+            switchRole,
+            closePinModal,
+            handleVerifyPin,
+            toggleLanguage,
+            switchTab,
+            copyLiveSessionLink,
+            handleAddSubscriber,
+            openEditSubscriberModal,
+            closeEditSubscriberModal,
+            handleSaveSubscriberEdit,
+            handleImportSubscribersExcel,
+            downloadSubscriberExcelTemplate,
+            editSubscriberDays,
+            toggleSubscriberActive,
+            sendWhatsAppReceipt,
+            openCollectModal,
+            openEditPaymentModal,
+            closePaymentModal,
+            handleSubmitPayment,
+            deleteUnapprovedPayment,
+            approveSinglePayment,
+            approveAllPayments,
+            revertPaymentToUnpaid,
+            handleAddExpense,
+            deleteExpense,
+            closeCurrentMonth,
+            setArchiveView,
+            editDailyArchiveRecord,
+            editMonthlyArchiveRecord,
+            handleSaveSettings,
+            resetDemoData
+        });
+    </script>
+</body>
+</html>// 
